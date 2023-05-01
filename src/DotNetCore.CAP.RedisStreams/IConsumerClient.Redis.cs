@@ -18,9 +18,9 @@ namespace DotNetCore.CAP.RedisStreams
     {
         private readonly string _groupId;
         private readonly ILogger<RedisConsumerClient> _logger;
-        private readonly IOptions<CapRedisOptions>  _options;
+        private readonly IOptions<CapRedisOptions> _options;
         private readonly IRedisStreamManager _redis;
-        private string[] _topics;
+        private string[] _topics = default!;
 
         public RedisConsumerClient(string groupId,
             IRedisStreamManager redis,
@@ -34,11 +34,11 @@ namespace DotNetCore.CAP.RedisStreams
             _logger = logger;
         }
 
-        public event EventHandler<TransportMessage> OnMessageReceived;
+        public Func<TransportMessage, object?, Task>? OnMessageCallback { get; set; }
 
-        public event EventHandler<LogMessageEventArgs> OnLog;
+        public Action<LogMessageEventArgs>? OnLogCallback { get; set; }
 
-        public BrokerAddress BrokerAddress => new BrokerAddress("redis", _options.Value.Endpoint);
+        public BrokerAddress BrokerAddress => new("redis", _options.Value.Endpoint);
 
         public void Subscribe(IEnumerable<string> topics)
         {
@@ -59,16 +59,17 @@ namespace DotNetCore.CAP.RedisStreams
                 cancellationToken.ThrowIfCancellationRequested();
                 cancellationToken.WaitHandle.WaitOne(timeout);
             }
+            // ReSharper disable once FunctionNeverReturns
         }
 
-        public void Commit(object sender)
+        public void Commit(object? sender)
         {
-            var (stream, group, id) = ((string stream, string group, string id)) sender;
+            var (stream, group, id) = ((string stream, string group, string id))sender!;
 
             _redis.Ack(stream, group, id).GetAwaiter().GetResult();
         }
 
-        public void Reject(object sender)
+        public void Reject(object? sender)
         {
             // ignore
         }
@@ -83,7 +84,8 @@ namespace DotNetCore.CAP.RedisStreams
             //first time, we want to read our pending messages, in case we crashed and are recovering.
             var pendingMsgs = _redis.PollStreamsPendingMessagesAsync(_topics, _groupId, timeout, cancellationToken);
 
-            await ConsumeMessages(pendingMsgs, StreamPosition.Beginning);
+            await ConsumeMessages(pendingMsgs, StreamPosition.Beginning)
+                .ConfigureAwait(false);
 
             //Once we consumed our history, we can start getting new messages.
             var newMsgs = _redis.PollStreamsLatestMessagesAsync(_topics, _groupId, timeout, cancellationToken);
@@ -94,32 +96,39 @@ namespace DotNetCore.CAP.RedisStreams
         private async Task ConsumeMessages(IAsyncEnumerable<IEnumerable<RedisStream>> streamsSet, RedisValue position)
         {
             await foreach (var set in streamsSet)
-            foreach (var stream in set)
-            foreach (var entry in stream.Entries)
             {
-                if (entry.IsNull)
-                    return;
-                try
+                foreach (var stream in set)
                 {
-                    var message = RedisMessage.Create(entry, _groupId);
-                    OnMessageReceived?.Invoke((stream.Key.ToString(), _groupId, entry.Id.ToString()), message);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex.Message, ex);
-                    var logArgs = new LogMessageEventArgs
+                    foreach (var entry in stream.Entries)
                     {
-                        LogType = MqLogType.ConsumeError,
-                        Reason = ex.ToString()
-                    };
-                    OnLog?.Invoke(entry, logArgs);
-                }
-                finally
-                {
-                    var positionName = position == StreamPosition.Beginning
-                        ? nameof(StreamPosition.Beginning)
-                        : nameof(StreamPosition.NewMessages);
-                    _logger.LogDebug($"Redis stream entry [{entry.Id}] [position : {positionName}] was delivered.");
+                        if (entry.IsNull)
+                        {
+                            return;
+                        }
+
+                        try
+                        {
+                            var message = RedisMessage.Create(entry, _groupId);
+                            await OnMessageCallback!(message, (stream.Key.ToString(), _groupId, entry.Id.ToString()));
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex.Message, ex);
+                            var logArgs = new LogMessageEventArgs
+                            {
+                                LogType = MqLogType.ConsumeError,
+                                Reason = ex.ToString()
+                            };
+                            OnLogCallback!(logArgs);
+                        }
+                        finally
+                        {
+                            var positionName = position == StreamPosition.Beginning
+                                ? nameof(StreamPosition.Beginning)
+                                : nameof(StreamPosition.NewMessages);
+                            _logger.LogDebug($"Redis stream entry [{entry.Id}] [position : {positionName}] was delivered.");
+                        }
+                    }
                 }
             }
         }

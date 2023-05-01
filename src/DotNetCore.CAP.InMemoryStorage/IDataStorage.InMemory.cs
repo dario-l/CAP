@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -26,11 +27,35 @@ namespace DotNetCore.CAP.InMemoryStorage
             _serializer = serializer;
         }
 
-        public static Dictionary<string, MemoryMessage> PublishedMessages { get; } = new Dictionary<string, MemoryMessage>();
+        public static ConcurrentDictionary<string, MemoryMessage> PublishedMessages { get; } = new();
 
-        public static Dictionary<string, MemoryMessage> ReceivedMessages { get; } = new Dictionary<string, MemoryMessage>();
+        public static ConcurrentDictionary<string, MemoryMessage> ReceivedMessages { get; } = new();
 
-        public Task ChangePublishStateAsync(MediumMessage message, StatusName state)
+        public Task<bool> AcquireLockAsync(string key, TimeSpan ttl, string instance, CancellationToken token = default)
+        {
+            return Task.FromResult(true);
+        }
+
+        public Task ReleaseLockAsync(string key, string instance, CancellationToken token = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task RenewLockAsync(string key, TimeSpan ttl, string instance, CancellationToken token = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task ChangePublishStateToDelayedAsync(string[] ids)
+        {
+            foreach (var id in ids)
+            {
+                PublishedMessages[id].StatusName = StatusName.Delayed;
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task ChangePublishStateAsync(MediumMessage message, StatusName state, object? dbTransaction = null)
         {
             PublishedMessages[message.DbId].StatusName = state;
             PublishedMessages[message.DbId].ExpiresAt = message.ExpiresAt;
@@ -46,7 +71,7 @@ namespace DotNetCore.CAP.InMemoryStorage
             return Task.CompletedTask;
         }
 
-        public MediumMessage StoreMessage(string name, Message content, object dbTransaction = null)
+        public Task<MediumMessage> StoreMessageAsync(string name, Message content, object? dbTransaction = null)
         {
             var message = new MediumMessage
             {
@@ -58,45 +83,41 @@ namespace DotNetCore.CAP.InMemoryStorage
                 Retries = 0
             };
 
-            lock (PublishedMessages)
+            PublishedMessages[message.DbId] = new MemoryMessage
             {
-                PublishedMessages[message.DbId] = new MemoryMessage
-                {
-                    DbId = message.DbId,
-                    Name = name,
-                    Content = message.Content,
-                    Retries = message.Retries,
-                    Added = message.Added,
-                    ExpiresAt = message.ExpiresAt,
-                    StatusName = StatusName.Scheduled
-                };
-            }
+                DbId = message.DbId,
+                Name = name,
+                Content = message.Content,
+                Retries = message.Retries,
+                Added = message.Added,
+                ExpiresAt = message.ExpiresAt,
+                StatusName = StatusName.Scheduled
+            };
 
-            return message;
+            return Task.FromResult(message);
         }
 
-        public void StoreReceivedExceptionMessage(string name, string group, string content)
+        public Task StoreReceivedExceptionMessageAsync(string name, string group, string content)
         {
             var id = SnowflakeId.Default().NextId().ToString();
 
-            lock (ReceivedMessages)
+            ReceivedMessages[id] = new MemoryMessage
             {
-                ReceivedMessages[id] = new MemoryMessage
-                {
-                    DbId = id,
-                    Group = group,
-                    Origin = null,
-                    Name = name,
-                    Content = content,
-                    Retries = _capOptions.Value.FailedRetryCount,
-                    Added = DateTime.Now,
-                    ExpiresAt = DateTime.Now.AddDays(15),
-                    StatusName = StatusName.Failed
-                };
-            }
+                DbId = id,
+                Group = group,
+                Origin = null!,
+                Name = name,
+                Content = content,
+                Retries = _capOptions.Value.FailedRetryCount,
+                Added = DateTime.Now,
+                ExpiresAt = DateTime.Now.AddSeconds(_capOptions.Value.FailedMessageExpiredAfter),
+                StatusName = StatusName.Failed
+            };
+
+            return Task.CompletedTask;
         }
 
-        public MediumMessage StoreReceivedMessage(string name, string @group, Message message)
+        public Task<MediumMessage> StoreReceivedMessageAsync(string name, string @group, Message message)
         {
             var mdMessage = new MediumMessage
             {
@@ -107,22 +128,20 @@ namespace DotNetCore.CAP.InMemoryStorage
                 Retries = 0
             };
 
-            lock (ReceivedMessages)
+            ReceivedMessages[mdMessage.DbId] = new MemoryMessage
             {
-                ReceivedMessages[mdMessage.DbId] = new MemoryMessage
-                {
-                    DbId = mdMessage.DbId,
-                    Origin = mdMessage.Origin,
-                    Group = group,
-                    Name = name,
-                    Content = _serializer.Serialize(mdMessage.Origin),
-                    Retries = mdMessage.Retries,
-                    Added = mdMessage.Added,
-                    ExpiresAt = mdMessage.ExpiresAt,
-                    StatusName = StatusName.Scheduled
-                };
-            }
-            return mdMessage;
+                DbId = mdMessage.DbId,
+                Origin = mdMessage.Origin,
+                Group = group,
+                Name = name,
+                Content = _serializer.Serialize(mdMessage.Origin),
+                Retries = mdMessage.Retries,
+                Added = mdMessage.Added,
+                ExpiresAt = mdMessage.ExpiresAt,
+                StatusName = StatusName.Scheduled
+            };
+
+            return Task.FromResult(mdMessage);
         }
 
         public Task<int> DeleteExpiresAsync(string table, DateTime timeout, int batchCount = 1000, CancellationToken token = default)
@@ -131,38 +150,31 @@ namespace DotNetCore.CAP.InMemoryStorage
             var removed = 0;
             if (table == nameof(PublishedMessages))
             {
-                lock (PublishedMessages)
-                {
-                    var ids = PublishedMessages.Values
-                        .Where(x => x.ExpiresAt < timeout)
-                        .Select(x => x.DbId)
-                        .Take(batchCount);
+                var ids = PublishedMessages.Values
+                    .Where(x => x.ExpiresAt < timeout)
+                    .Select(x => x.DbId)
+                    .Take(batchCount);
 
-                    foreach (var id in ids)
+                foreach (var id in ids)
+                {
+                    if (PublishedMessages.TryRemove(id, out _))
                     {
-                        if (PublishedMessages.Remove(id))
-                        {
-                            removed++;
-                        }
+                        removed++;
                     }
                 }
-
             }
             else
             {
-                lock (ReceivedMessages)
-                {
-                    var ids = ReceivedMessages.Values
-                        .Where(x => x.ExpiresAt < timeout)
-                        .Select(x => x.DbId)
-                        .Take(batchCount);
+                var ids = ReceivedMessages.Values
+                    .Where(x => x.ExpiresAt < timeout)
+                    .Select(x => x.DbId)
+                    .Take(batchCount);
 
-                    foreach (var id in ids)
+                foreach (var id in ids)
+                {
+                    if (ReceivedMessages.TryRemove(id, out _))
                     {
-                        if (ReceivedMessages.Remove(id))
-                        {
-                            removed++;
-                        }
+                        removed++;
                     }
                 }
             }
@@ -172,46 +184,41 @@ namespace DotNetCore.CAP.InMemoryStorage
 
         public Task<IEnumerable<MediumMessage>> GetPublishedMessagesOfNeedRetry()
         {
-            IEnumerable<MediumMessage> result;
-
-            lock (PublishedMessages)
-            {
-                result = PublishedMessages.Values
+            IEnumerable<MediumMessage> result = PublishedMessages.Values
                 .Where(x => x.Retries < _capOptions.Value.FailedRetryCount
                             && x.Added < DateTime.Now.AddSeconds(-10)
                             && (x.StatusName == StatusName.Scheduled || x.StatusName == StatusName.Failed))
                 .Take(200)
                 .Select(x => (MediumMessage)x).ToList();
-            }
 
-            foreach (var message in result)
-            {
-                message.Origin = _serializer.Deserialize(message.Content);
-            }
+            //foreach (var message in result)
+            //{
+            //    message.Origin = _serializer.DeserializeAsync(message.Content)!;
+            //}
 
             return Task.FromResult(result);
         }
 
         public Task<IEnumerable<MediumMessage>> GetReceivedMessagesOfNeedRetry()
         {
-            IEnumerable<MediumMessage> result;
-
-            lock (ReceivedMessages)
-            {
-                result = ReceivedMessages.Values
-                    .Where(x => x.Retries < _capOptions.Value.FailedRetryCount
-                                && x.Added < DateTime.Now.AddSeconds(-10)
-                                && (x.StatusName == StatusName.Scheduled || x.StatusName == StatusName.Failed))
-                    .Take(200)
-                    .Select(x => (MediumMessage)x).ToList();
-            }
-
-            foreach (var message in result)
-            {
-                message.Origin = _serializer.Deserialize(message.Content);
-            }
+            IEnumerable<MediumMessage> result = ReceivedMessages.Values
+                .Where(x => x.Retries < _capOptions.Value.FailedRetryCount
+                            && x.Added < DateTime.Now.AddSeconds(-10)
+                            && (x.StatusName == StatusName.Scheduled || x.StatusName == StatusName.Failed))
+                .Take(200)
+                .Select(x => (MediumMessage)x).ToList();
 
             return Task.FromResult(result);
+        }
+
+        public Task ScheduleMessagesOfDelayedAsync(Func<object, IEnumerable<MediumMessage>, Task> scheduleTask, CancellationToken token = default)
+        {
+            var result = PublishedMessages.Values.Where(x =>
+                    (x.StatusName == StatusName.Delayed && x.ExpiresAt < DateTime.Now.AddMinutes(2))
+                    || (x.StatusName == StatusName.Queued && x.ExpiresAt < DateTime.Now.AddMinutes(-1)))
+                .Select(x => (MediumMessage)x);
+
+            return scheduleTask(null!, result);
         }
 
         public IMonitoringApi GetMonitoringApi()

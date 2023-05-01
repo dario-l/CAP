@@ -1,23 +1,23 @@
 <template>
   <div>
-    <h1 class="text-left mb-4">Nodes</h1>
-    <b-table :fields="fields" :items="items" :busy="isBusy" show-empty empty-text="Unconfigure node discovery !">
+    <h2 class="text-left mb-4">{{ $t("Nodes") }}</h2>
+    <b-table :fields="fields" :items="items" :busy="isBusy"  show-empty empty-text="Unconfigure node discovery !">
       <template #table-busy>
         <div class="text-center text-secondary my-2">
           <b-spinner class="align-middle"></b-spinner>
-          <strong class="ml-2">Loading...</strong>
+          <strong class="ml-2">{{ $t("Loading") }}...</strong>
         </div>
       </template>
 
       <template #empty="scope">
-        <h4 class="alert alert-primary" role="alert">
+        <h5 class="alert alert-primary" role="alert">
           <b-icon-info-circle-fill /> {{ scope.emptyText }}
-        </h4>
+        </h5>
       </template>
 
       <template #cell(actions)="data">
         <b-button size="sm" @click="switchNode(data.item)" class="mr-1">
-          Switch
+          {{ $t("Switch") }}
         </b-button>
       </template>
     </b-table>
@@ -25,19 +25,28 @@
 </template>
 <script>
 import axios from 'axios';
+import { BIconInfoCircleFill } from 'bootstrap-vue';
+
 export default {
+  components: {
+    BIconInfoCircleFill
+  },
   data() {
     return {
       isBusy: false,
-      fields: [
-        { key: "id", label: "Id" },
-        { key: "name", label: "Node Name" },
-        { key: "address", label: "Ip Address" },
-        { key: "port", label: "Port" },
-        { key: "tags", label: "Tags" },
-        { key: "actions", label: "Actions" },
-      ],
       items: []
+    }
+  },
+  computed: {
+    fields() {
+      return [
+        { key: "id", label: this.$t("Id") },
+        { key: "name", label: this.$t("Node Name") },
+        { key: "address", label: this.$t("Ip Address") },
+        { key: "port", label: this.$t("Port") },
+        { key: "tags", label: this.$t("Tags") },
+        { key: "actions", label: this.$t("Actions") },
+      ];
     }
   },
   mounted() {
@@ -46,11 +55,11 @@ export default {
   methods: {
     fetchData() {
       this.isBusy = true;
-      var id = this.getCookie('cap.node');
+      var name = this.getCookie('cap.node');
       axios.get('/nodes').then(res => {
         for (var item of res.data) {
-          if (item.id == id) {
-            item._rowVariant = 'primary'
+          if (item.name == name) {
+            item._rowVariant = 'dark'
           }
         }
         this.items = res.data;
@@ -59,7 +68,7 @@ export default {
     },
 
     switchNode(item) {
-      document.cookie = `cap.node=${escape(item.id)};`;
+      document.cookie = `cap.node=${escape(item.name)};`;
       window.location.reload();
     },
 
@@ -82,3 +91,8 @@ export default {
 
 };
 </script>
+<style >
+.table-dark td {
+  border-color: #c6c8ca;
+}
+</style>

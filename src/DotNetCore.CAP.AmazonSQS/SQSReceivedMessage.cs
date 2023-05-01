@@ -1,18 +1,21 @@
-﻿using System.Collections.Generic;
+﻿// Copyright (c) .NET Core Community. All rights reserved.
+// Licensed under the MIT License. See License.txt in the project root for license information.
+
+using System.Collections.Generic;
 
 namespace DotNetCore.CAP.AmazonSQS
 {
-    class SQSReceivedMessage
+    internal class SQSReceivedMessage
     {
-        public string Message { get; set; }
+        public string? Message { get; set; }
 
-        public Dictionary<string, SQSReceivedMessageAttributes> MessageAttributes { get; set; }
+        public Dictionary<string, SQSReceivedMessageAttributes> MessageAttributes { get; set; } = default!;
     }
 
-    class SQSReceivedMessageAttributes
+    internal class SQSReceivedMessageAttributes
     {
-        public string Type { get; set; }
+        public string? Type { get; set; }
 
-        public string Value { get; set; }
+        public string? Value { get; set; }
     }
 }

@@ -28,11 +28,11 @@ namespace DotNetCore.CAP.RedisStreams
 
             var redisLogger = new RedisLogger(logger);
 
-            ConnectionMultiplexer connection = null;
+            ConnectionMultiplexer? connection = null;
 
             while (attemp <= 5)
             {
-                connection = await ConnectionMultiplexer.ConnectAsync(redisOptions.Configuration, redisLogger)
+                connection = await ConnectionMultiplexer.ConnectAsync(redisOptions.Configuration!, redisLogger)
                 .ConfigureAwait(false);
 
                 connection.LogEvents(logger);

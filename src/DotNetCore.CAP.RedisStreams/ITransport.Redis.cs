@@ -25,13 +25,14 @@ namespace DotNetCore.CAP.RedisStreams
             _logger = logger;
         }
 
-        public BrokerAddress BrokerAddress => new BrokerAddress("redis", _options.Endpoint);
+        public BrokerAddress BrokerAddress => new ("redis", _options.Endpoint);
 
         public async Task<OperateResult> SendAsync(TransportMessage message)
         {
             try
             {
-                await _redis.PublishAsync(message.GetName(), message.AsStreamEntries());
+                await _redis.PublishAsync(message.GetName(), message.AsStreamEntries())
+                    .ConfigureAwait(false);
 
                 _logger.LogDebug($"Redis message [{message.GetName()}] has been published.");
 

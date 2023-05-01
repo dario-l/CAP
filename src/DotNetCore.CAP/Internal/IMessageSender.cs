@@ -3,12 +3,10 @@
 
 using System.Threading.Tasks;
 using DotNetCore.CAP.Persistence;
-using JetBrains.Annotations;
 
-namespace DotNetCore.CAP.Internal
+namespace DotNetCore.CAP.Internal;
+
+public interface IMessageSender
 {
-    public interface IMessageSender
-    {
-        Task<OperateResult> SendAsync([NotNull] MediumMessage message);
-    }
+    Task<OperateResult> SendAsync(MediumMessage message);
 }

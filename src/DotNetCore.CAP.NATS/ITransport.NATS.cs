@@ -34,7 +34,7 @@ namespace DotNetCore.CAP.NATS
 
             try
             {
-                var msg = new Msg(message.GetName(), message.Body);
+                var msg = new Msg(message.GetName(), message.Body.ToArray());
                 foreach (var header in message.Headers)
                 {
                     msg.Header[header.Key] = header.Value;
@@ -42,7 +42,7 @@ namespace DotNetCore.CAP.NATS
 
                 var js = connection.CreateJetStreamContext(_jetStreamOptions);
 
-                var builder = PublishOptions.Builder().WithExpectedStream(Helper.Normalized(message.GetName())).WithMessageId(message.GetId());
+                var builder = PublishOptions.Builder().WithMessageId(message.GetId());
 
                 var resp = await js.PublishAsync(msg, builder.Build());
 

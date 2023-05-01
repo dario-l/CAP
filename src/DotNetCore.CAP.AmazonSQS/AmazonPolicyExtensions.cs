@@ -1,3 +1,6 @@
+// Copyright (c) .NET Core Community. All rights reserved.
+// Licensed under the MIT License. See License.txt in the project root for license information.
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -209,7 +212,7 @@ namespace DotNetCore.CAP.AmazonSQS
         /// </summary>
         /// <param name="arn">Source ARN</param>
         /// <returns>Group prefix or null if group not present</returns>
-        private static string GetArnGroupPrefix(string arn)
+        private static string? GetArnGroupPrefix(string arn)
         {
             const char separator = '-';
             if (string.IsNullOrEmpty(arn) || !arn.Contains(separator))
@@ -235,7 +238,7 @@ namespace DotNetCore.CAP.AmazonSQS
         /// </summary>
         /// <param name="arn">Source ARN</param>
         /// <returns>Group name or null if group not present</returns>
-        private static string GetGroupName(string arn)
+        private static string? GetGroupName(string arn)
         {
             const char separator = ':';
             if (string.IsNullOrEmpty(arn) || !arn.Contains(separator))

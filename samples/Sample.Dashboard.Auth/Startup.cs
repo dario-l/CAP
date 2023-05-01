@@ -17,8 +17,12 @@ namespace Sample.Dashboard.Auth
 
         public void ConfigureServices(IServiceCollection services)
         {
-            services
-               .AddAuthorization()
+            services                
+               .AddAuthorization((options =>
+               {
+                   // only if you want to apply role filter to CAP Dashboard user 
+                   options.AddPolicy("PolicyCap", policy => policy.RequireRole("admin.events"));
+               }))
                .AddAuthentication(options =>
                {
                    options.DefaultScheme =  CookieAuthenticationDefaults.AuthenticationScheme;
@@ -27,7 +31,7 @@ namespace Sample.Dashboard.Auth
                .AddCookie()
                .AddOpenIdConnect(options =>
                {
-                   options.Authority = "https://demo.identityserver.io/";
+                   options.Authority = "https://demo.duendesoftware.com/";
                    options.ClientId = "interactive.confidential";
                    options.ClientSecret = "secret";
                    options.ResponseType = "code";
@@ -55,8 +59,10 @@ namespace Sample.Dashboard.Auth
                     d.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
                     d.UseAuth = true;
                     d.DefaultAuthenticationScheme = "MyDashboardScheme";
+                    // only if you want to apply policy authorization filter to CAP Dashboard user 
+                    //d.AuthorizationPolicy = "PolicyCap";
                 });
-                cap.UseMySql(_configuration.GetValue<string>("ConnectionString"));
+                cap.UseMySql("server=192.168.3.57;port=3307;database=cap;UserId=root;Password=123123;");
                 cap.UseRabbitMQ(aa =>
                 {
                     aa.HostName = "192.168.3.57";

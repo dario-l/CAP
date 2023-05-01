@@ -27,26 +27,26 @@ namespace DotNetCore.CAP.RabbitMQ
             _exchange = _connectionChannelPool.Exchange;
         }
 
-        public BrokerAddress BrokerAddress => new BrokerAddress("RabbitMQ", _connectionChannelPool.HostAddress);
+        public BrokerAddress BrokerAddress => new("RabbitMQ", _connectionChannelPool.HostAddress);
 
         public Task<OperateResult> SendAsync(TransportMessage message)
         {
-            IModel channel = null;
+            IModel? channel = null;
             try
             {
                 channel = _connectionChannelPool.Rent();
 
-                channel.ConfirmSelect();
-
                 var props = channel.CreateBasicProperties();
                 props.DeliveryMode = 2;
-                props.Headers = message.Headers.ToDictionary(x => x.Key, x => (object)x.Value);
-
-                channel.ExchangeDeclare(_exchange, RabbitMQOptions.ExchangeType, true);
+                props.Headers = message.Headers.ToDictionary(x => x.Key, x => (object?)x.Value);
 
                 channel.BasicPublish(_exchange, message.GetName(), props, message.Body);
 
-                channel.WaitForConfirmsOrDie(TimeSpan.FromSeconds(5));
+                // Enable publish confirms
+                if (channel.NextPublishSeqNo > 0)
+                {
+                    channel.WaitForConfirmsOrDie(TimeSpan.FromSeconds(5));
+                }
 
                 _logger.LogInformation("CAP message '{0}' published, internal id '{1}'", message.GetName(), message.GetId());
 
